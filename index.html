@@ -16,10 +16,12 @@
 </head>
 <body>
 
-  <h3>CW-TRX モールス・共有デコーダーモニター</h3>
-  <div class="info">画面を一度クリックした後、左Ctrlキー（またはVBand電鍵アダプター）を押してください。同じURLを開いている仲間と音が同期します。</div>
+  <h3>CW-TRX | Morse Shared Decoder Monitor</h3>
+  <div class="info">Click the screen first, then press Left Ctrl </br>
+or VBand USB Paddle Interface. </br>
+Audio will sync with others on this URL.</div>
   <div id="monitor"></div>
-  <div id="status">現在入力中: <span id="currentCode"></span></div>
+  <div id="status">Now Input: <span id="currentCode"></span></div>
 
   <script>
     const socket = io(); // サーバーへ接続
