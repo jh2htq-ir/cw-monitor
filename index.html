@@ -7,7 +7,10 @@
     body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
     h3 { color: #FFFFFF; margin-bottom: 5px; }
     .info { color: #888888; font-size: 14px; margin-bottom: 20px; }
-    #monitor { background-color: #000000; border: 20px solid #333333; border-radius: 8px; padding: 15px; width: 600px; height: 240px; font-size: 20px; line-height: 1.2; overflow: hidden; white-space: pre-wrap; word-wrap: break-word; box-shadow: inset 0 0 10px #00FF00; box-sizing: border-box; }
+    /* 【修正】overflowをscroll(またはauto)に変更し、スクロールバーを非表示（またはスタイリッシュに）にします */
+    #monitor { background-color: #000000; border: 20px solid #333333; border-radius: 8px; padding: 15px; width: 600px; height: 240px; font-size: 20px; line-height: 1.2; overflow-y: scroll; white-space: pre-wrap; word-wrap: break-word; box-shadow: inset 0 0 10px #00FF00; box-sizing: border-box; }
+    /* 黒い画面の雰囲気を壊さないよう、スクロールバーを黒一色にして隠します */
+    #monitor::-webkit-scrollbar { width: 0px; background: transparent; }
     #status { margin-top: 15px; font-size: 16px; color: #FFFF00; }
   </style>
   <!-- リアルタイム通信用のライブラリを読み込み -->
@@ -56,8 +59,15 @@
       if (canvasCtx.measureText(lastLine).width > maxWidthLimit) {
         lines[lines.length - 1] = "\n" + lastLine; decodedText = lines.join('\n').replace('\n\n', '\n'); lines = decodedText.split('\n');
       }
-      while (lines.length > 10) { lines.shift(); }
-      decodedText = lines.join('\n'); monitorEl.textContent = decodedText;
+      
+      // 【修正】古い行を強制削除する古いコード「while (lines.length > 10) { lines.shift(); }」を削除しました。
+      // これにより、過去のログが消えずに蓄積されます。
+      
+      decodedText = lines.join('\n');
+      monitorEl.textContent = decodedText;
+
+      // 【修正】新しい文字が追加されたら、モニターの最下部（最新行）へ自動スクロールさせます
+      monitorEl.scrollTop = monitorEl.scrollHeight;
 
       // 自分が解読に成功した文字を、仲間の画面にも送る
       if (!isRemote) { socket.emit('morse_event', { type: 'char', value: newChar }); }
