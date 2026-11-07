@@ -2,131 +2,27 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>CW リアルタイム・モールス共有モニター</title>
+  <title>CW リアルタイム・モールス共有モニター - チャンネル選択</title>
   <style>
-    body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
+    body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; text-align: center; }
     h3 { color: #FFFFFF; margin-bottom: 5px; }
-    .info { color: #888888; font-size: 14px; margin-bottom: 20px; }
-    #monitor { background-color: #000000; border: 20px solid #333333; border-radius: 8px; padding: 15px; width: 600px; height: 240px; font-size: 20px; line-height: 1.2; overflow-y: scroll; white-space: pre-wrap; word-wrap: break-word; box-shadow: inset 0 0 10px #00FF00; box-sizing: border-box; }
-    #monitor::-webkit-scrollbar { width: 0px; background: transparent; }
-    #status { margin-top: 15px; font-size: 16px; color: #FFFF00; }
+    .info { color: #888888; font-size: 14px; margin-bottom: 30px; }
+    .channels { display: flex; justify-content: center; gap: 15px; margin-top: 40px; }
+    .channel-btn { background-color: #222222; color: #00FF00; border: 2px solid #00FF00; padding: 15px 25px; font-size: 18px; font-family: 'Courier New', Courier, monospace; border-radius: 8px; cursor: pointer; text-decoration: none; box-shadow: 0 0 10px rgba(0,255,0,0.2); transition: 0.2s; }
+    .channel-btn:hover { background-color: #00FF00; color: #000000; box-shadow: 0 0 15px #00FF00; }
   </style>
-  <!-- リアルタイム通信用のライブラリを読み込み -->
-  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 
-  <h3>CW-TRX | Morse Shared Decoder Monitor</h3>
-  <div class="info">Click the screen first, then press Left Ctrl </br>
-or VBand USB Paddle Interface. </br>
-Audio will sync with others on this URL.</div>
-  <div id="monitor"></div>
-  <div id="status">Now Input: <span id="currentCode"></span></div>
+  <h3>CW-TRX モールス・共有デコーダーモニター</h3>
+  <div class="info">運用するチャンネルを選択してください。</div>
 
-  <script>
-    const socket = io(); // サーバーへ接続
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    let osc = null;
+  <div class="channels">
+    <a href="Channel-1.html" class="channel-btn">Ch. 1</a>
+    <a href="Channel-2.html" class="channel-btn">Ch. 2</a>
+    <a href="Channel-3.html" class="channel-btn">Ch. 3</a>
+    <a href="Channel-4.html" class="channel-btn">Ch. 4</a>
+  </div>
 
-    const DOT_TIME = 50; 
-    const DASH_TIME = DOT_TIME * 3;     
-    const LETTER_GAP = DOT_TIME * 3;    
-    const WORD_GAP = DOT_TIME * 7;      
-
-    const morseTable = {
-      ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
-    };
-
-    let signalStartTime = 0; let silenceStartTime = 0; let currentCode = ""; let decodedText = ""; let gapAdded = true;
-    const monitorEl = document.getElementById('monitor'); const currentCodeEl = document.getElementById('currentCode');
-    const canvas = document.createElement('canvas'); const canvasCtx = canvas.getContext('2d');
-    canvasCtx.font = "20px 'Courier New', Courier, monospace";
-
-    // 音を鳴らす・止める内部関数
-    function startTone() {
-      if (!osc) {
-        osc = ctx.createOscillator(); osc.frequency.value = 700; osc.connect(ctx.destination); osc.start();
-      }
-    }
-    function stopTone() {
-      if (osc) { osc.stop(); osc = null; }
-    }
-
-    function updateMonitor(newChar, isRemote = false) {
-      // 修正完了：『=』のときは「=」を表示した上で改行する
-      if (newChar === "=") { 
-        decodedText += "=\n"; 
-      } else { 
-        decodedText += newChar; 
-      }
-
-      let lines = decodedText.split('\n'); 
-      let lastLine = lines[lines.length - 1];
-      const maxWidthLimit = (monitorEl.clientWidth - 30) * 0.90;
-
-      // 折り返し計算時の幅判定
-      if (canvasCtx.measureText(lastLine).width > maxWidthLimit) {
-        lines[lines.length - 1] = "\n" + lastLine;
-        decodedText = lines.join('\n');
-      }
-
-      // 複数連続する無用な改行を整理する
-      decodedText = decodedText.replace(/\n\n+/g, '\n');
-
-      monitorEl.textContent = decodedText;
-
-      // 新しい文字が追加されたら最下部へ自動スクロール
-      monitorEl.scrollTop = monitorEl.scrollHeight;
-
-      // 自分が解読に成功した文字を仲間の画面にも送信
-      if (!isRemote) { 
-        socket.emit('morse_event', { type: 'char', value: newChar }); 
-      }
-    }
-
-    // 他の人が打ったデータを受信した時の処理
-    socket.on('morse_event', (data) => {
-      if (data.type === 'keydown') { startTone(); }
-      else if (data.type === 'keyup') { stopTone(); }
-      else if (data.type === 'char') { updateMonitor(data.value, true); }
-    });
-
-    // 自動判定タイマー
-    setInterval(() => {
-      if (silenceStartTime > 0) {
-        const silenceDuration = Date.now() - silenceStartTime;
-        if (silenceDuration >= LETTER_GAP && currentCode.length > 0) {
-          const char = morseTable[currentCode];
-          if (char) { updateMonitor(char); }
-          currentCode = ""; currentCodeEl.textContent = ""; gapAdded = false;
-        }
-        if (silenceDuration >= WORD_GAP && !gapAdded) {
-          if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
-            updateMonitor(" "); 
-          }
-          gapAdded = true;
-        }
-      }
-    }, 10);
-
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'ControlLeft') {
-        e.preventDefault(); if (e.repeat) return;
-        startTone();
-        signalStartTime = Date.now(); silenceStartTime = 0;
-        socket.emit('morse_event', { type: 'keydown' }); // 仲間へ通知
-      }
-    });
-
-    window.addEventListener('keyup', (e) => {
-      if (e.code === 'ControlLeft') {
-        stopTone();
-        const duration = Date.now() - signalStartTime; silenceStartTime = Date.now();
-        if (duration < (DASH_TIME - (DOT_TIME / 2))) { currentCode += "."; } else { currentCode += "-"; }
-        currentCodeEl.textContent = currentCode;
-        socket.emit('morse_event', { type: 'keyup' }); // 仲間へ通知
-      }
-    });
-  </script>
 </body>
 </html>
