@@ -8,9 +8,15 @@ const io = require('socket.io')(http, {
 app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
-  // 誰かがキーを押した/離した/改行した、のデータを全員に転送
-  socket.on('morse_event', (data) => {
-    socket.broadcast.emit('morse_event', data);
+  // クライアントから「どのチャンネルに参加するか」を受け取る
+  socket.on('join_room', (roomName) => {
+    socket.join(roomName);
+    console.log(`ユーザーが部屋 [${roomName}] に参加しました`);
+
+    // その部屋（チャンネル）の中にいるメンバーだけにイベントを転送する
+    socket.on('morse_event', (data) => {
+      socket.broadcast.to(roomName).emit('morse_event', data);
+    });
   });
 });
 
