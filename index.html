@@ -5,7 +5,24 @@
   <title>CW リアルタイム・モールス共有モニター - メイン</title>
   <style>
     body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
-    h3 { color: #FFFFFF; margin-bottom: 5px; }
+    
+    .header-container { display: flex; align-items: center; justify-content: space-between; width: 600px; margin-bottom: 5px; }
+    h3 { color: #FFFFFF; margin: 0; }
+    
+    /* 音声トグルボタン用スタイル */
+    .sound-btn {
+      background-color: #222;
+      color: #00FF00;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 14px;
+      user-select: none;
+    }
+    .sound-btn:hover { border-color: #00FF00; }
+    .sound-btn.muted { color: #FF4444; border-color: #FF4444; }
+
     .info { color: #888888; font-size: 14px; margin-bottom: 15px; }
     #monitor { background-color: #000000; border: 20px solid #333333; border-radius: 8px; padding: 15px; width: 600px; height: 240px; font-size: 20px; line-height: 1.2; overflow-y: scroll; white-space: pre-wrap; word-wrap: break-word; box-shadow: inset 0 0 10px #00FF00; box-sizing: border-box; }
     #monitor::-webkit-scrollbar { width: 0px; background: transparent; }
@@ -17,20 +34,15 @@
     .nav-links a:hover { color: #00FF00; border-color: #00FF00; }
   </style>
   <script src="/socket.io/socket.io.js"></script>
-
-<!--    .nav-links { margin-top: 20px; display: flex; gap: 10px; align-items: center; }
-    .nav-links span { color: #888888; font-size: 14px; margin-right: 5px; }
-    .nav-links a { color: #888888; text-decoration: none; border: 1px solid #444; padding: 5px 12px; border-radius: 4px; font-size: 14px; transition: 0.2s; }
-    .nav-links a:hover { color: #00FF00; border-color: #00FF00; }
-    .nav-links a.active { color: #00FF00; border-color: #00FF00; background-color: #1a2a1a; } -->
-  </style>
-  <!-- リアルタイム通信用のライブラリを読み込み -->
-
-  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 
-  <h3>Morse Shared Monitor [ Channel: Main ]</h3>
+  <div class="header-container">
+    <h3>Morse Shared Monitor [ Channel: Main ]</h3>
+    <!-- 送信音/受信音切り替え用ボタン -->
+    <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
+  </div>
+  
   <div class="info">Click the screen, then use "USB Paddle Interface".</div>
   
   <div id="monitor"></div>
@@ -53,29 +65,58 @@
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     let osc = null;
+    let isMuted = false; // 音声ON/OFF切り替え用フラグ
 
+    // 【不具合2対策】タイミング判定の微調整
     const DOT_TIME = 50; 
     const DASH_TIME = DOT_TIME * 3;     
-    const LETTER_GAP = DOT_TIME * 3;    
-    const WORD_GAP = DOT_TIME * 7;      
+    const LETTER_GAP = DOT_TIME * 3.5;  // 175ms: 文字間確定タイマー（少し余裕を持たせる）
+    const WORD_GAP = DOT_TIME * 9.5;    // 475ms: 単語間（空白）判定タイマー（誤って空白が入るのを防止）
 
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
     };
 
     let signalStartTime = 0; let silenceStartTime = 0; let currentCode = ""; let decodedText = ""; let gapAdded = true;
-    const monitorEl = document.getElementById('monitor'); const currentCodeEl = document.getElementById('currentCode');
+    const monitorEl = document.getElementById('monitor'); 
+    const currentCodeEl = document.getElementById('currentCode');
+    const toggleSoundBtn = document.getElementById('toggleSoundBtn');
+    
     const canvas = document.createElement('canvas'); const canvasCtx = canvas.getContext('2d');
     canvasCtx.font = "20px 'Courier New', Courier, monospace";
 
-    // 音を鳴らす・止める内部関数
+    // スピーカーボタンのクリックイベント（ON/OFF切り替え）
+    toggleSoundBtn.addEventListener('click', () => {
+      isMuted = !isMuted;
+      if (isMuted) {
+        toggleSoundBtn.textContent = "🔇 Sound: OFF";
+        toggleSoundBtn.classList.add('muted');
+        stopTone();
+      } else {
+        toggleSoundBtn.textContent = "🔊 Sound: ON";
+        toggleSoundBtn.classList.remove('muted');
+      }
+    });
+
+    // 音を鳴らす・止める内部関数（ミュート時は発音しない）
     function startTone() {
+      if (isMuted) return;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
       if (!osc) {
-        osc = ctx.createOscillator(); osc.frequency.value = 700; osc.connect(ctx.destination); osc.start();
+        osc = ctx.createOscillator(); 
+        osc.frequency.value = 700; 
+        osc.connect(ctx.destination); 
+        osc.start();
       }
     }
+    
     function stopTone() {
-      if (osc) { osc.stop(); osc = null; }
+      if (osc) { 
+        osc.stop(); 
+        osc = null; 
+      }
     }
 
     function updateMonitor(newChar, isRemote = false) {
@@ -114,11 +155,15 @@
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
+        
+        // 文字の確定判定
         if (silenceDuration >= LETTER_GAP && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) { updateMonitor(char); }
           currentCode = ""; currentCodeEl.textContent = ""; gapAdded = false;
         }
+        
+        // 単語間の空白（スペース）判定
         if (silenceDuration >= WORD_GAP && !gapAdded) {
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
@@ -141,7 +186,14 @@
       if (e.code === 'ControlLeft') {
         stopTone();
         const duration = Date.now() - signalStartTime; silenceStartTime = Date.now();
-        if (duration < (DASH_TIME - (DOT_TIME / 2))) { currentCode += "."; } else { currentCode += "-"; }
+        
+        // 短点・長点の判定閾値（標準長点150msに対し100msを境目とする）
+        if (duration < 100) { 
+          currentCode += "."; 
+        } else { 
+          currentCode += "-"; 
+        }
+        
         currentCodeEl.textContent = currentCode;
         socket.emit('morse_event', { type: 'keyup' }); // 仲間へ通知
       }
