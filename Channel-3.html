@@ -2,14 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>CW リアルタイム・モールス共有モニター - チャンネル ３</title>
+  <title>CW リアルタイム・モールス共有モニター - チャンネル 3</title>
   <style>
     body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
     
     .header-container { display: flex; align-items: center; justify-content: space-between; width: 600px; margin-bottom: 5px; }
     h3 { color: #FFFFFF; margin: 0; }
     
-    /* 音声トグルボタン用スタイル */
     .sound-btn {
       background-color: #222;
       color: #00FF00;
@@ -38,7 +37,6 @@
 
   <div class="header-container">
     <h3>Morse Shared Monitor [ Channel: 3 ]</h3>
-    <!-- 送信音/受信音切り替え用ボタン -->
     <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
   </div>
   
@@ -58,24 +56,26 @@
 
   <script>
     const socket = io();
-    
-    // サーバへ「チャンネル1の部屋に入る」ことを通知する
     socket.emit('join_room', 'channel-1');
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     let osc = null;
-    let isMuted = false; // 音声ON/OFF切り替え用フラグ
+    let isMuted = false;
 
-    const DOT_TIME = 50; 
-    const DASH_TIME = DOT_TIME * 3;     
-    const LETTER_GAP = DOT_TIME * 3.5;  // 文字間確定タイマー（少し余裕を持たせる）
-    const WORD_GAP = DOT_TIME * 9.5;    // 単語間（空白）判定タイマー（誤って空白が入るのを防止）
+    // 動的適応型パラメータ（15WPM標準をベースに学習）
+    let estimatedDotTime = 80;   
+    let estimatedDashTime = 240; 
 
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
     };
 
-    let signalStartTime = 0; let silenceStartTime = 0; let currentCode = ""; let decodedText = ""; let gapAdded = true;
+    let signalStartTime = 0; 
+    let silenceStartTime = 0; 
+    let currentCode = ""; 
+    let decodedText = ""; 
+    let gapAdded = false;
+    
     const monitorEl = document.getElementById('monitor'); 
     const currentCodeEl = document.getElementById('currentCode');
     const toggleSoundBtn = document.getElementById('toggleSoundBtn');
@@ -83,7 +83,6 @@
     const canvas = document.createElement('canvas'); const canvasCtx = canvas.getContext('2d');
     canvasCtx.font = "20px 'Courier New', Courier, monospace";
 
-    // スピーカーボタンのクリックイベント（ON/OFF切り替え）
     toggleSoundBtn.addEventListener('click', () => {
       isMuted = !isMuted;
       if (isMuted) {
@@ -98,9 +97,7 @@
 
     function startTone() {
       if (isMuted) return;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
-      }
+      if (ctx.state === 'suspended') { ctx.resume(); }
       if (!osc) {
         osc = ctx.createOscillator(); 
         osc.frequency.value = 700; 
@@ -110,10 +107,7 @@
     }
     
     function stopTone() {
-      if (osc) { 
-        osc.stop(); 
-        osc = null; 
-      }
+      if (osc) { osc.stop(); osc = null; }
     }
 
     function updateMonitor(newChar, isRemote = false) {
@@ -147,19 +141,35 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
+    // 定期監視ループ：文字確定および単語スペースの自動処理
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
-        if (silenceDuration >= LETTER_GAP && currentCode.length > 0) {
+        
+        // 1. 文字確定の無音判定（短点の約3.2倍：文字途中で勝手に切れないよう保護）
+        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
+        if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
-          if (char) { updateMonitor(char); }
-          currentCode = ""; currentCodeEl.textContent = ""; gapAdded = false;
+          if (char) {
+            updateMonitor(char);
+          }
+          currentCode = "";
+          currentCodeEl.textContent = "";
         }
-        if (silenceDuration >= WORD_GAP && !gapAdded) {
+
+        // 2. 単語間スペースの判定（約6倍に調整し、CとAやTとOの間で勝手にスペースが入るのを防止）
+        const wordGapThreshold = Math.max(500, estimatedDotTime * 6.0);
+        if (silenceDuration >= wordGapThreshold && !gapAdded) {
+          if (currentCode.length > 0) {
+            const char = morseTable[currentCode];
+            if (char) { updateMonitor(char); }
+            currentCode = "";
+            currentCodeEl.textContent = "";
+          }
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
-          gapAdded = true;
+          gapAdded = true; // 今回のスペース挿入完了をマーク
         }
       }
     }, 10);
@@ -167,8 +177,22 @@
     window.addEventListener('keydown', (e) => {
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
+        
+        // 次の打鍵の直前、無音が十分に経っていれば前の文字を確定させる
+        if (silenceStartTime > 0 && currentCode.length > 0) {
+          const silenceDuration = Date.now() - silenceStartTime;
+          if (silenceDuration >= estimatedDotTime * 2.2) {
+            const char = morseTable[currentCode];
+            if (char) { updateMonitor(char); }
+            currentCode = "";
+            currentCodeEl.textContent = "";
+          }
+        }
+
         startTone();
-        signalStartTime = Date.now(); silenceStartTime = 0;
+        signalStartTime = Date.now(); 
+        silenceStartTime = 0;
+        gapAdded = false; // 新しい打鍵が始まったのでスペース判定フラグをリセット
         socket.emit('morse_event', { type: 'keydown' });
       }
     });
@@ -176,15 +200,33 @@
     window.addEventListener('keyup', (e) => {
       if (e.code === 'ControlLeft') {
         stopTone();
-        const duration = Date.now() - signalStartTime; silenceStartTime = Date.now();
+        const duration = Date.now() - signalStartTime; 
+        silenceStartTime = Date.now();
         
-        // 短点・長点の判定閾値（100msを境目とする）
-        if (duration < 100) { 
-          currentCode += "."; 
-        } else { 
-          currentCode += "-"; 
+        const threshold = (estimatedDotTime + estimatedDashTime) / 2;
+        const symbol = duration < threshold ? "." : "-";
+
+        // 打鍵スピードのリアルタイム学習
+        if (symbol === ".") {
+          estimatedDotTime = estimatedDotTime * 0.85 + duration * 0.15;
+        } else {
+          estimatedDashTime = estimatedDashTime * 0.85 + duration * 0.15;
+          estimatedDotTime = estimatedDotTime * 0.85 + (duration / 3) * 0.15;
         }
         
+        // 速度制限の安全保護
+        if (estimatedDotTime < 40) estimatedDotTime = 40;
+        if (estimatedDotTime > 300) estimatedDotTime = 300;
+        estimatedDashTime = estimatedDotTime * 3;
+
+        // 符号を蓄積
+        currentCode += symbol;
+
+        // 6文字以上の異常な蓄積を防ぐリセット
+        if (currentCode.length > 6) {
+          currentCode = "";
+        }
+
         currentCodeEl.textContent = currentCode;
         socket.emit('morse_event', { type: 'keyup' });
       }
