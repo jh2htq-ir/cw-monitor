@@ -50,7 +50,7 @@
   <!-- 画面下部のチャンネル切り替えアイコン（ナビゲーション） -->
   <div class="nav-links">
     <a href="index.html">Main</a>
-    <a href="Channel-1.html" style="color:#00FF00; border-color:#FF0000;">Ch.1</a>
+    <a href="Channel-1.html" style="color:#00FF00; border-color:#00FF00;">Ch.1</a>
     <a href="Channel-2.html">Ch.2</a>
     <a href="Channel-3.html">Ch.3</a>
     <a href="Channel-4.html">Ch.4</a>
@@ -66,7 +66,7 @@
     let osc = null;
     let isMuted = false;
 
-    // --- 15WPM（標準的スピード：短点約80ms）を初期値に設定 ---
+    // 15WPM（標準的スピード：短点約80ms）を初期値に設定
     let estimatedDotTime = 80;   
     let estimatedDashTime = 240; 
 
@@ -140,14 +140,14 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 15WPMのテンポに合わせた文字間・単語間判定タイマー
+    // 文字間・単語間の判定タイマー（しきい値を調整）
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 15WPM基準のギャップ判定（短点の約3.2倍以上で文字確定）
-        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
-        const wordGapThreshold = Math.max(550, estimatedDotTime * 7.5);
+        // 【調整値】文字間の無音判定を少し長め（約4.2倍）に取り、文字がくっつくのを防止
+        const letterGapThreshold = Math.max(280, estimatedDotTime * 4.2);
+        const wordGapThreshold = Math.max(650, estimatedDotTime * 8.5);
 
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
@@ -179,12 +179,10 @@
         const duration = Date.now() - signalStartTime; 
         silenceStartTime = Date.now();
         
-        // 短点・長点の判定閾値
         const threshold = (estimatedDotTime + estimatedDashTime) / 2;
 
         if (duration < threshold) {
           currentCode += ".";
-          // 追従性を安定させるため学習ウェイトを調整
           estimatedDotTime = estimatedDotTime * 0.85 + duration * 0.15;
         } else {
           currentCode += "-";
@@ -193,7 +191,6 @@
           estimatedDotTime = estimatedDotTime * 0.85 + inferredDot * 0.15;
         }
 
-        // 15WPM前後に合わせた制限範囲
         if (estimatedDotTime < 50) estimatedDotTime = 50;
         if (estimatedDotTime > 200) estimatedDotTime = 200;
         estimatedDashTime = estimatedDotTime * 3;
