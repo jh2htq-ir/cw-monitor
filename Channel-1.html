@@ -40,7 +40,7 @@
     <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
   </div>
   
-  <div class="info">Standard Natural Rhythm Mode (Fixed E/T bug).</div>
+  <div class="info">Natural Rhythm Mode with Word Spacing Fix.</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
@@ -72,7 +72,7 @@
     let silenceStartTime = 0; 
     let currentCode = ""; 
     let decodedText = ""; 
-    let gapChecked = true;
+    let gapChecked = false;
     
     const monitorEl = document.getElementById('monitor'); 
     const currentCodeEl = document.getElementById('currentCode');
@@ -139,34 +139,29 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 定期監視：自然な無音間隔で文字および単語を確定
+    // 定期監視：文字間および単語間の空白判定
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 文字間ギャップ（短点約2.2〜2.5倍の無音で、たまっている符号を1文字として確定）
+        // 1. 文字間ギャップ（約160ms以上の無音で1文字確定）
         const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) {
             updateMonitor(char);
-          } else {
-            // 万が一辞書にない場合は文字化けを防ぐためクリア
-            console.log("Unknown code:", currentCode);
           }
           currentCode = "";
           currentCodeEl.textContent = "";
-          silenceStartTime = 0;
-          gapChecked = false;
         }
 
-        // 単語間ギャップ（スペース挿入）
+        // 2. 単語間ギャップ（約450ms以上の無音でスペース挿入）
         const wordGapThreshold = Math.max(450, estimatedDotTime * 6.0);
         if (silenceDuration >= wordGapThreshold && !gapChecked) {
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
-          gapChecked = true;
+          gapChecked = true; // 今回の単語間スペース挿入完了をマーク
         }
       }
     }, 10);
@@ -174,9 +169,25 @@
     window.addEventListener('keydown', (e) => {
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
+        
+        // 新しい打鍵が始まったら、まだ確定していない文字があれば先に確定させる
+        if (silenceStartTime > 0 && currentCode.length > 0) {
+          const silenceDuration = Date.now() - silenceStartTime;
+          const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
+          if (silenceDuration >= letterGapThreshold / 2) {
+            const char = morseTable[currentCode];
+            if (char) {
+              updateMonitor(char);
+            }
+            currentCode = "";
+            currentCodeEl.textContent = "";
+          }
+        }
+
         startTone();
         signalStartTime = Date.now(); 
         silenceStartTime = 0;
+        gapChecked = false; // 新しい打鍵が始まったのでスペース判定フラグをリセット
         socket.emit('morse_event', { type: 'keydown' });
       }
     });
@@ -186,7 +197,6 @@
         stopTone();
         const duration = Date.now() - signalStartTime; 
         silenceStartTime = Date.now();
-        gapChecked = false;
         
         const threshold = (estimatedDotTime + estimatedDashTime) / 2;
         const symbol = duration < threshold ? "." : "-";
@@ -200,10 +210,8 @@
         }
         estimatedDashTime = estimatedDotTime * 3;
 
-        // 符号を蓄積（勝手に即座に吐き出さないように修正）
         currentCode += symbol;
 
-        // もし6文字以上に膨らんだら安全のためリセット
         if (currentCode.length > 6) {
           currentCode = "";
         }
