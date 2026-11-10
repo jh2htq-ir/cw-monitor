@@ -40,7 +40,7 @@
     <button id="toggleSoundBtn" class="sound-btn">Sound: ON</button>
   </div>
   
-  <div class="info">Hybrid Paddle & Straight Key Mode.***</div>
+  <div class="info">Quick Word Spacing Mode.</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
@@ -145,8 +145,8 @@
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 1. 文字確定の無音判定（短点の約3.2倍：ストレートキーでも途中で切れない絶妙な長さ）
-        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
+        // 1. 文字確定の無音判定（短点の約2.3倍）
+        const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) {
@@ -156,8 +156,8 @@
           currentCodeEl.textContent = "";
         }
 
-        // 2. 単語間スペースの判定（約600ms以上の無音）
-        const wordGapThreshold = Math.max(550, estimatedDotTime * 7.0);
+        // 2. 単語間スペースの判定（★従来の約7倍から約4.2倍へと短縮し、軽く一息つく程度でスペースが入るように調整）
+        const wordGapThreshold = Math.max(350, estimatedDotTime * 4.2);
         if (silenceDuration >= wordGapThreshold) {
           if (currentCode.length > 0) {
             const char = morseTable[currentCode];
@@ -180,7 +180,7 @@
         // 次の打鍵の直前、無音が十分に経っていれば前の文字を確定させる
         if (silenceStartTime > 0 && currentCode.length > 0) {
           const silenceDuration = Date.now() - silenceStartTime;
-          if (silenceDuration >= estimatedDotTime * 2.2) {
+          if (silenceDuration >= estimatedDotTime * 2.0) {
             const char = morseTable[currentCode];
             if (char) { updateMonitor(char); }
             currentCode = "";
@@ -212,7 +212,7 @@
           estimatedDotTime = estimatedDotTime * 0.85 + (duration / 3) * 0.15;
         }
         
-        // 速度制限の安全保護（極端な値への暴走を防ぐ）
+        // 速度制限の安全保護
         if (estimatedDotTime < 40) estimatedDotTime = 40;
         if (estimatedDotTime > 300) estimatedDotTime = 300;
         estimatedDashTime = estimatedDotTime * 3;
@@ -220,7 +220,7 @@
         // 符号を蓄積
         currentCode += symbol;
 
-        // もし誤って6文字以上に膨らんだ場合は文字化け防止のためリセット
+        // 6文字以上の異常な蓄積を防ぐリセット
         if (currentCode.length > 6) {
           currentCode = "";
         }
