@@ -2,14 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>CW リアルタイム・モールス共有モニター - チャンネル ２</title>
+  <title>CW リアルタイム・モールス共有モニター - チャンネル 1</title>
   <style>
     body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
     
     .header-container { display: flex; align-items: center; justify-content: space-between; width: 600px; margin-bottom: 5px; }
     h3 { color: #FFFFFF; margin: 0; }
     
-    /* 音声トグルボタン用スタイル */
     .sound-btn {
       background-color: #222;
       color: #00FF00;
@@ -37,45 +36,43 @@
 <body>
 
   <div class="header-container">
-    <h3>Morse Shared Monitor [ Channel: 2 ]</h3>
-    <!-- 送信音/受信音切り替え用ボタン -->
+    <h3>Morse Shared Monitor [ Channel: 1 ]</h3>
     <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
   </div>
   
-  <div class="info">Click the screen, then use "USB Paddle Interface".</div>
+  <div class="info">Keydown Auto-Flush Mode (Fast & seamless typing).</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
 
-  <!-- 画面下部のチャンネル切り替えアイコン（ナビゲーション） -->
   <div class="nav-links">
     <a href="index.html">Main</a>
-    <a href="Channel-1.html">Ch.1</a>
-    <a href="Channel-2.html" style="color:#00FF00; border-color:#FF0000;">Ch.2</a>
+    <a href="Channel-1.html" style="color:#00FF00; border-color:#FF0000;">Ch.1</a>
+    <a href="Channel-2.html">Ch.2</a>
     <a href="Channel-3.html">Ch.3</a>
     <a href="Channel-4.html">Ch.4</a>
   </div>
 
   <script>
     const socket = io();
-    
-    // サーバへ「チャンネル1の部屋に入る」ことを通知する
     socket.emit('join_room', 'channel-1');
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     let osc = null;
-    let isMuted = false; // 音声ON/OFF切り替え用フラグ
+    let isMuted = false;
 
-    const DOT_TIME = 50; 
-    const DASH_TIME = DOT_TIME * 3;     
-    const LETTER_GAP = DOT_TIME * 3.5;  // 文字間確定タイマー（少し余裕を持たせる）
-    const WORD_GAP = DOT_TIME * 9.5;    // 単語間（空白）判定タイマー（誤って空白が入るのを防止）
+    let estimatedDotTime = 80;   
+    let estimatedDashTime = 240; 
 
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
     };
 
-    let signalStartTime = 0; let silenceStartTime = 0; let currentCode = ""; let decodedText = ""; let gapAdded = true;
+    let signalStartTime = 0; 
+    let silenceStartTime = 0; 
+    let currentCode = ""; 
+    let decodedText = ""; 
+    
     const monitorEl = document.getElementById('monitor'); 
     const currentCodeEl = document.getElementById('currentCode');
     const toggleSoundBtn = document.getElementById('toggleSoundBtn');
@@ -83,7 +80,6 @@
     const canvas = document.createElement('canvas'); const canvasCtx = canvas.getContext('2d');
     canvasCtx.font = "20px 'Courier New', Courier, monospace";
 
-    // スピーカーボタンのクリックイベント（ON/OFF切り替え）
     toggleSoundBtn.addEventListener('click', () => {
       isMuted = !isMuted;
       if (isMuted) {
@@ -98,9 +94,7 @@
 
     function startTone() {
       if (isMuted) return;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
-      }
+      if (ctx.state === 'suspended') { ctx.resume(); }
       if (!osc) {
         osc = ctx.createOscillator(); 
         osc.frequency.value = 700; 
@@ -110,10 +104,7 @@
     }
     
     function stopTone() {
-      if (osc) { 
-        osc.stop(); 
-        osc = null; 
-      }
+      if (osc) { osc.stop(); osc = null; }
     }
 
     function updateMonitor(newChar, isRemote = false) {
@@ -147,19 +138,26 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
+    // 定期監視（単語間のスペース判定のみ）
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
-        if (silenceDuration >= LETTER_GAP && currentCode.length > 0) {
-          const char = morseTable[currentCode];
-          if (char) { updateMonitor(char); }
-          currentCode = ""; currentCodeEl.textContent = ""; gapAdded = false;
-        }
-        if (silenceDuration >= WORD_GAP && !gapAdded) {
+        
+        // ひと文字打ち終わったあと、一定時間（約0.6秒）無音が続いたら未確定分を確定し、スペースを挿入
+        const wordGapThreshold = Math.max(500, estimatedDotTime * 7.0);
+        if (silenceDuration >= wordGapThreshold) {
+          if (currentCode.length > 0) {
+            if (morseTable[currentCode]) {
+              updateMonitor(morseTable[currentCode]);
+            }
+            currentCode = "";
+            currentCodeEl.textContent = "";
+          }
+
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
-          gapAdded = true;
+          silenceStartTime = 0; 
         }
       }
     }, 10);
@@ -167,8 +165,19 @@
     window.addEventListener('keydown', (e) => {
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
+        
+        // --- ★ 【重要改善】次の打鍵が始まった瞬間に、溜まっていた文字を即座に確定・クリア ★ ---
+        if (currentCode.length > 0) {
+          if (morseTable[currentCode]) {
+            updateMonitor(morseTable[currentCode]);
+          }
+          currentCode = "";
+          currentCodeEl.textContent = "";
+        }
+
         startTone();
-        signalStartTime = Date.now(); silenceStartTime = 0;
+        signalStartTime = Date.now(); 
+        silenceStartTime = 0;
         socket.emit('morse_event', { type: 'keydown' });
       }
     });
@@ -176,15 +185,50 @@
     window.addEventListener('keyup', (e) => {
       if (e.code === 'ControlLeft') {
         stopTone();
-        const duration = Date.now() - signalStartTime; silenceStartTime = Date.now();
+        const duration = Date.now() - signalStartTime; 
+        silenceStartTime = Date.now();
         
-        // 短点・長点の判定閾値（100msを境目とする）
-        if (duration < 100) { 
-          currentCode += "."; 
-        } else { 
-          currentCode += "-"; 
+        const threshold = (estimatedDotTime + estimatedDashTime) / 2;
+        const symbol = duration < threshold ? "." : "-";
+
+        // 速度学習
+        if (symbol === ".") {
+          estimatedDotTime = estimatedDotTime * 0.85 + duration * 0.15;
+        } else {
+          estimatedDashTime = estimatedDashTime * 0.85 + duration * 0.15;
+          estimatedDotTime = estimatedDotTime * 0.85 + (duration / 3) * 0.15;
         }
-        
+        estimatedDashTime = estimatedDotTime * 3;
+
+        // 符号を追加
+        currentCode += symbol;
+
+        // もし現在の符号が完全な文字として辞書に一致し、それ以上続けられない形なら即時確定
+        let canContinue = false;
+        for (let key in morseTable) {
+          if (key !== currentCode && key.startsWith(currentCode)) {
+            canContinue = true;
+            break;
+          }
+        }
+
+        if (morseTable[currentCode] && !canContinue) {
+          updateMonitor(morseTable[currentCode]);
+          currentCode = "";
+        }
+
+        // 万が一、辞書に存在しない長すぎるゴミになった場合はクリア
+        let isValid = false;
+        for (let key in morseTable) {
+          if (key.startsWith(currentCode)) {
+            isValid = true;
+            break;
+          }
+        }
+        if (!isValid) {
+          currentCode = "";
+        }
+
         currentCodeEl.textContent = currentCode;
         socket.emit('morse_event', { type: 'keyup' });
       }
