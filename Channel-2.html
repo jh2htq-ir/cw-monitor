@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>CW リアルタイム・モールス共有モニター - チャンネル 2</title>
+  <title>CW リアルタイム・モールス共有モニター - チャンネル ２</title>
   <style>
     body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
     
@@ -37,7 +37,8 @@
 
   <div class="header-container">
     <h3>Morse Shared Monitor [ Channel: 2 ]</h3>
-    <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
+    <!-- ボタン名は分かりやすく「自分の送信音」のON/OFFに変更 -->
+    <button id="toggleSoundBtn" class="sound-btn">SideTone: ON</button>
   </div>
   
   <div class="info">Click the screen, then use "USB Paddle Interface".</div>
@@ -59,10 +60,12 @@
     socket.emit('join_room', 'channel-1');
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    let osc = null;
-    let isMuted = false;
+    
+    // 自局送信音用と、他局受信音用に独立したオシレータ（発振器）を用意
+    let myOsc = null;
+    let remoteOsc = null;
+    let isSideToneMuted = false; // 自分の送信音ミュートフラグ
 
-    // 動的適応型パラメータ（15WPM標準をベースに学習）
     let estimatedDotTime = 80;   
     let estimatedDashTime = 240; 
 
@@ -83,31 +86,52 @@
     const canvas = document.createElement('canvas'); const canvasCtx = canvas.getContext('2d');
     canvasCtx.font = "20px 'Courier New', Courier, monospace";
 
+    // サイドトーン（自分の送信音）のON/OFF切り替え
     toggleSoundBtn.addEventListener('click', () => {
-      isMuted = !isMuted;
-      if (isMuted) {
-        toggleSoundBtn.textContent = "🔇 Sound: OFF";
+      isSideToneMuted = !isSideToneMuted;
+      if (isSideToneMuted) {
+        toggleSoundBtn.textContent = "SideTone: OFF";
         toggleSoundBtn.classList.add('muted');
-        stopTone();
+        stopMyTone(); // 鳴っていたら止める
       } else {
-        toggleSoundBtn.textContent = "🔊 Sound: ON";
+        toggleSoundBtn.textContent = "SideTone: ON";
         toggleSoundBtn.classList.remove('muted');
       }
     });
 
-    function startTone() {
-      if (isMuted) return;
+    // 1. 自分の送信音（サイドトーン）制御
+    function startMyTone() {
+      if (isSideToneMuted) return; // サイドトーンOFFなら鳴らさない
       if (ctx.state === 'suspended') { ctx.resume(); }
-      if (!osc) {
-        osc = ctx.createOscillator(); 
-        osc.frequency.value = 700; 
-        osc.connect(ctx.destination); 
-        osc.start();
+      if (!myOsc) {
+        myOsc = ctx.createOscillator(); 
+        myOsc.frequency.value = 700; 
+        myOsc.connect(ctx.destination); 
+        myOsc.start();
       }
     }
-    
-    function stopTone() {
-      if (osc) { osc.stop(); osc = null; }
+    function stopMyTone() {
+      if (myOsc) { 
+        myOsc.stop(); 
+        myOsc = null; 
+      }
+    }
+
+    // 2. 相手の受信音制御（ボタン設定に関わらず常に鳴る）
+    function startRemoteTone() {
+      if (ctx.state === 'suspended') { ctx.resume(); }
+      if (!remoteOsc) {
+        remoteOsc = ctx.createOscillator(); 
+        remoteOsc.frequency.value = 700; 
+        remoteOsc.connect(ctx.destination); 
+        remoteOsc.start();
+      }
+    }
+    function stopRemoteTone() {
+      if (remoteOsc) { 
+        remoteOsc.stop(); 
+        remoteOsc = null; 
+      }
     }
 
     function updateMonitor(newChar, isRemote = false) {
@@ -135,9 +159,10 @@
       }
     }
 
+    // 他の人が打ったデータを受信した時の処理（受信音は常に鳴る）
     socket.on('morse_event', (data) => {
-      if (data.type === 'keydown') { startTone(); }
-      else if (data.type === 'keyup') { stopTone(); }
+      if (data.type === 'keydown') { startRemoteTone(); }
+      else if (data.type === 'keyup') { stopRemoteTone(); }
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
@@ -146,7 +171,6 @@
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 1. 文字確定の無音判定（短点の約3.2倍：文字途中で勝手に切れないよう保護）
         const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
@@ -157,7 +181,6 @@
           currentCodeEl.textContent = "";
         }
 
-        // 2. 単語間スペースの判定（約6倍に調整し、CとAやTとOの間で勝手にスペースが入るのを防止）
         const wordGapThreshold = Math.max(500, estimatedDotTime * 6.0);
         if (silenceDuration >= wordGapThreshold && !gapAdded) {
           if (currentCode.length > 0) {
@@ -169,7 +192,7 @@
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
-          gapAdded = true; // 今回のスペース挿入完了をマーク
+          gapAdded = true; 
         }
       }
     }, 10);
@@ -178,10 +201,9 @@
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
         
-        // 次の打鍵の直前、無音が十分に経っていれば前の文字を確定させる
         if (silenceStartTime > 0 && currentCode.length > 0) {
           const silenceDuration = Date.now() - silenceStartTime;
-          if (silenceDuration >= estimatedDotTime * 2.2) {
+          if (silenceDuration >= estimatedDotTime * 2.0) {
             const char = morseTable[currentCode];
             if (char) { updateMonitor(char); }
             currentCode = "";
@@ -189,24 +211,23 @@
           }
         }
 
-        startTone();
+        startMyTone(); // 自分の送信音（サイドトーンOFFなら鳴らない）
         signalStartTime = Date.now(); 
         silenceStartTime = 0;
-        gapAdded = false; // 新しい打鍵が始まったのでスペース判定フラグをリセット
+        gapAdded = false; 
         socket.emit('morse_event', { type: 'keydown' });
       }
     });
 
     window.addEventListener('keyup', (e) => {
       if (e.code === 'ControlLeft') {
-        stopTone();
+        stopMyTone(); // 自分の送信音を止める
         const duration = Date.now() - signalStartTime; 
         silenceStartTime = Date.now();
         
         const threshold = (estimatedDotTime + estimatedDashTime) / 2;
         const symbol = duration < threshold ? "." : "-";
 
-        // 打鍵スピードのリアルタイム学習
         if (symbol === ".") {
           estimatedDotTime = estimatedDotTime * 0.85 + duration * 0.15;
         } else {
@@ -214,15 +235,11 @@
           estimatedDotTime = estimatedDotTime * 0.85 + (duration / 3) * 0.15;
         }
         
-        // 速度制限の安全保護
         if (estimatedDotTime < 40) estimatedDotTime = 40;
         if (estimatedDotTime > 300) estimatedDotTime = 300;
         estimatedDashTime = estimatedDotTime * 3;
 
-        // 符号を蓄積
         currentCode += symbol;
-
-        // 6文字以上の異常な蓄積を防ぐリセット
         if (currentCode.length > 6) {
           currentCode = "";
         }
