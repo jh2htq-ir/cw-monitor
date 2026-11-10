@@ -37,10 +37,10 @@
 
   <div class="header-container">
     <h3>Morse Shared Monitor [ Channel: 1 ]</h3>
-    <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
+    <button id="toggleSoundBtn" class="sound-btn">Sound: ON</button>
   </div>
   
-  <div class="info">Smart Natural Rhythm Mode (Auto Word Spacing).</div>
+  <div class="info">Stable Morse Shared Monitor Mode.</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
@@ -69,11 +69,6 @@
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
     };
 
-    // よく使われるアマチュア無線・英語の略語・単語辞書（スペース自動挿入のヒントになります）
-    const commonWords = [
-      "TNX", "QSO", "CARE", "TONE", "ES", "CQ", "DE", "RST", "QTH", "OP", "NAME", "RIG", "ANT", "73", "88", "GE", "GM", "GA", "GN", "TEST", "PSE", "K", "SK", "RRR", "FB"
-    ];
-
     let signalStartTime = 0; 
     let silenceStartTime = 0; 
     let currentCode = ""; 
@@ -89,11 +84,11 @@
     toggleSoundBtn.addEventListener('click', () => {
       isMuted = !isMuted;
       if (isMuted) {
-        toggleSoundBtn.textContent = "🔇 Sound: OFF";
+        toggleSoundBtn.textContent = "Sound: OFF";
         toggleSoundBtn.classList.add('muted');
         stopTone();
       } else {
-        toggleSoundBtn.textContent = "🔊 Sound: ON";
+        toggleSoundBtn.textContent = "Sound: ON";
         toggleSoundBtn.classList.remove('muted');
       }
     });
@@ -113,32 +108,11 @@
       if (osc) { osc.stop(); osc = null; }
     }
 
-    // モニター文字列を更新しつつ、既知の単語に一致したら自動でスペースを挿入するスマート処理
     function updateMonitor(newChar, isRemote = false) {
       if (newChar === "=") { 
         decodedText += "=\n"; 
       } else { 
         decodedText += newChar; 
-      }
-
-      // --- スマート自動スペース補正 ---
-      // 末尾に溜まった未スペースの文字列から、一般的な単語（TNX, QSO, CARE など）が形成された場合、直前に自動でスペースを入れる
-      if (!isRemote && decodedText.length > 2) {
-        let cleanText = decodedText.trimEnd();
-        let words = cleanText.split(/\s+/);
-        let lastWord = words[words.length - 1];
-        
-        // 直近の文字塊が既知の単語リストに含まれているかチェック
-        for (let word of commonWords) {
-          // 例: "TNXFB" のように前の文字とくっついている場合、"TNX" の部分で切り離す
-          if (cleanText.length > word.length && cleanText.endsWith(word)) {
-            let beforePart = cleanText.slice(0, cleanText.length - word.length);
-            if (!beforePart.endsWith(" ")) {
-              decodedText = beforePart + " " + word;
-              break;
-            }
-          }
-        }
       }
 
       let lines = decodedText.split('\n'); 
@@ -165,13 +139,13 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 定期監視：文字間の空白判定（少し短めのテンポでもしっかり文字を区切る）
+    // 定期監視：文字間および単語間の空白判定（確実に動く標準方式に安全化）
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 文字間ギャップ（短点の約2.5倍の無音で1文字をキビキビ確定）
-        const letterGapThreshold = Math.max(150, estimatedDotTime * 2.5);
+        // 1. 文字間ギャップ（約200ms以上の無音で1文字確定）
+        const letterGapThreshold = Math.max(180, estimatedDotTime * 2.5);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) {
@@ -181,9 +155,9 @@
           currentCodeEl.textContent = "";
         }
 
-        // 軽い無音（約350ms）で、自然な単語の区切りとしてスペースを自動挿入
-        const naturalWordGap = Math.max(350, estimatedDotTime * 4.5);
-        if (silenceDuration >= naturalWordGap) {
+        // 2. 単語間ギャップ（約450ms以上の無音でスペース挿入）
+        const wordGapThreshold = Math.max(450, estimatedDotTime * 6.0);
+        if (silenceDuration >= wordGapThreshold) {
           if (currentCode.length > 0) {
             const char = morseTable[currentCode];
             if (char) { updateMonitor(char); }
@@ -202,10 +176,9 @@
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
         
-        // 打鍵の直前に少し無音があれば蓄積文字を確定
         if (silenceStartTime > 0 && currentCode.length > 0) {
           const silenceDuration = Date.now() - silenceStartTime;
-          if (silenceDuration >= 90) {
+          if (silenceDuration >= 100) {
             const char = morseTable[currentCode];
             if (char) { updateMonitor(char); }
             currentCode = "";
@@ -238,7 +211,6 @@
         }
         estimatedDashTime = estimatedDotTime * 3;
 
-        // 符号を蓄積
         currentCode += symbol;
         if (currentCode.length > 6) {
           currentCode = ""; 
