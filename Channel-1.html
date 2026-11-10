@@ -40,17 +40,18 @@
     <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
   </div>
   
-  <div class="info">Robust Buffer-Protection Mode.</div>
+  <div class="info">Click the screen, then use "Paddle / Straight Key Interface".</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
 
+  <!-- 画面下部のチャンネル切り替えアイコン（ナビゲーション） -->
   <div class="nav-links">
     <a href="index.html">Main</a>
-    <a href="Channel-1.html" style="color:#00FF00; border-color:#FF0000;">Ch.1</a>
-    <a href="Channel-2.html">Channel 2</a>
-    <a href="Channel-3.html">Channel 3</a>
-    <a href="Channel-4.html">Channel 4</a>
+    <a href="Channel-1.html" style="color:#00FF00; border-color:#00FF00;">Ch.1</a>
+    <a href="Channel-2.html">Ch.2</a>
+    <a href="Channel-3.html">Ch.3</a>
+    <a href="Channel-4.html">Ch.4</a>
   </div>
 
   <script>
@@ -61,21 +62,13 @@
     let osc = null;
     let isMuted = false;
 
+    // 15WPM（標準的スピード：短点約80ms）を初期値に設定
     let estimatedDotTime = 80;   
     let estimatedDashTime = 240; 
 
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
     };
-
-    // 有効なプレフィックス（途中形）かチェックするヘルパー
-    function isValidPrefix(code) {
-      if (morseTable[code]) return true;
-      for (let key in morseTable) {
-        if (key.startsWith(code)) return true;
-      }
-      return false;
-    }
 
     let signalStartTime = 0; 
     let silenceStartTime = 0; 
@@ -148,43 +141,29 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 定期監視：文字間および単語間の空白判定 ＆ 汚染バッファの自動掃除
+    // 定期監視：文字間および単語間の空白判定
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 1. 文字間ギャップ（約160ms以上の無音で1文字確定）
-        const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
+        // 1. 文字間ギャップ（短点の約3.5倍の無音で1文字を確定）
+        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.5);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
-          if (morseTable[currentCode]) {
-            updateMonitor(morseTable[currentCode]);
+          const char = morseTable[currentCode];
+          if (char) {
+            updateMonitor(char);
           }
           currentCode = "";
           currentCodeEl.textContent = "";
         }
 
-        // 2. 単語間ギャップ（約450ms以上の無音でスペース挿入）
-        const wordGapThreshold = Math.max(450, estimatedDotTime * 6.0);
+        // 2. 単語間ギャップ（スペース挿入）
+        const wordGapThreshold = Math.max(500, estimatedDotTime * 7.5);
         if (silenceDuration >= wordGapThreshold && !gapChecked) {
-          // 放置された未確定コードがあれば先に清算
-          if (currentCode.length > 0) {
-            if (morseTable[currentCode]) {
-              updateMonitor(morseTable[currentCode]);
-            }
-            currentCode = "";
-            currentCodeEl.textContent = "";
-          }
-
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
           gapChecked = true;
-        }
-
-        // 3. 長時間放置されたゴミバッファの完全自動クリア（約700ms以上無音なら強制リセット）
-        if (silenceDuration >= 700 && currentCode.length > 0) {
-          currentCode = "";
-          currentCodeEl.textContent = "";
         }
       }
     }, 10);
@@ -193,13 +172,12 @@
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
         
-        // 新しい打鍵が始まった直前、適度に無音があったなら前の蓄積文字を確定させる
+        // 次の打鍵が始まった瞬間に、無音が十分に経っていれば前の蓄積文字を確定させる
         if (silenceStartTime > 0 && currentCode.length > 0) {
           const silenceDuration = Date.now() - silenceStartTime;
-          if (silenceDuration >= 100) {
-            if (morseTable[currentCode]) {
-              updateMonitor(morseTable[currentCode]);
-            }
+          if (silenceDuration >= estimatedDotTime * 2.0) {
+            const char = morseTable[currentCode];
+            if (char) { updateMonitor(char); }
             currentCode = "";
             currentCodeEl.textContent = "";
           }
@@ -231,33 +209,13 @@
         }
         estimatedDashTime = estimatedDotTime * 3;
 
-        // --- 頑健なバッファ処理 ＋ 暴走防止 ---
+        // 符号を蓄積
         currentCode += symbol;
-
-        // もし蓄積されたコードがどのモールス文字のプレフィックスにもかすらない場合、
-        // または長すぎる（6文字超）場合は、バッファ崩壊を防ぐため即座にリセットする
-        if (!isValidPrefix(currentCode) || currentCode.length > 6) {
-          // 直前までで文字として成立していればそれを救う
-          let salvaged = false;
-          for (let len = currentCode.length - 1; len >= 1; len--) {
-            let sub = currentCode.slice(0, len);
-            if (morseTable[sub]) {
-              updateMonitor(morseTable[sub]);
-              salvaged = true;
-              break;
-            }
-          }
-          // 救えない完全なゴミの場合は破棄してリセット
-          currentCode = "";
+        if (currentCode.length > 6) {
+          currentCode = ""; // 万が一長すぎたらリセット
         }
-
-        // ちょうど辞書に完全一致する文字になった場合、即時確定してクリア
-        if (morseTable[currentCode]) {
-          updateMonitor(morseTable[currentCode]);
-          currentCode = "";
-        }
-
         currentCodeEl.textContent = currentCode;
+
         socket.emit('morse_event', { type: 'keyup' });
       }
     });
