@@ -42,7 +42,7 @@
     <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
   </div>
   
-  <div class="info">Click the screen, then use "USB Paddle Interface".</div>
+  <div class="info">Click the screen, then use "Paddle / Straight Key Interface".</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
@@ -50,7 +50,7 @@
   <!-- 画面下部のチャンネル切り替えアイコン（ナビゲーション） -->
   <div class="nav-links">
     <a href="index.html">Main</a>
-    <a href="Channel-1.html" style="color:#00FF00; border-color:#FF0000;">Ch.1</a>
+    <a href="Channel-1.html" style="color:#00FF00; border-color:#00FF00;">Ch.1</a>
     <a href="Channel-2.html">Ch.2</a>
     <a href="Channel-3.html">Ch.3</a>
     <a href="Channel-4.html">Ch.4</a>
@@ -64,12 +64,11 @@
 
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     let osc = null;
-    let isMuted = false; // 音声ON/OFF切り替え用フラグ
+    let isMuted = false;
 
-    const DOT_TIME = 50; 
-    const DASH_TIME = DOT_TIME * 3;     
-    const LETTER_GAP = DOT_TIME * 3.5;  // 文字間確定タイマー（少し余裕を持たせる）
-    const WORD_GAP = DOT_TIME * 9.5;    // 単語間（空白）判定タイマー（誤って空白が入るのを防止）
+    // --- 【重要】動的適応型パラメータ（パドル・ストレートキー両対応） ---
+    let estimatedDotTime = 70;   // 初期推定の短点時間 (ms)
+    let estimatedDashTime = 210; // 初期推定の長点時間 (ms)
 
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
@@ -83,7 +82,6 @@
     const canvas = document.createElement('canvas'); const canvasCtx = canvas.getContext('2d');
     canvasCtx.font = "20px 'Courier New', Courier, monospace";
 
-    // スピーカーボタンのクリックイベント（ON/OFF切り替え）
     toggleSoundBtn.addEventListener('click', () => {
       isMuted = !isMuted;
       if (isMuted) {
@@ -98,9 +96,7 @@
 
     function startTone() {
       if (isMuted) return;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
-      }
+      if (ctx.state === 'suspended') { ctx.resume(); }
       if (!osc) {
         osc = ctx.createOscillator(); 
         osc.frequency.value = 700; 
@@ -110,10 +106,7 @@
     }
     
     function stopTone() {
-      if (osc) { 
-        osc.stop(); 
-        osc = null; 
-      }
+      if (osc) { osc.stop(); osc = null; }
     }
 
     function updateMonitor(newChar, isRemote = false) {
@@ -147,15 +140,22 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
+    // 定期チェック（文字間・単語間の判定も動的スピードに連動）
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
-        if (silenceDuration >= LETTER_GAP && currentCode.length > 0) {
+        
+        // 動的な文字間・単語間ギャップの計算
+        const letterGapThreshold = Math.max(120, estimatedDotTime * 3.2);
+        const wordGapThreshold = Math.max(350, estimatedDotTime * 8.5);
+
+        if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) { updateMonitor(char); }
           currentCode = ""; currentCodeEl.textContent = ""; gapAdded = false;
         }
-        if (silenceDuration >= WORD_GAP && !gapAdded) {
+        
+        if (silenceDuration >= wordGapThreshold && !gapAdded) {
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
@@ -176,15 +176,29 @@
     window.addEventListener('keyup', (e) => {
       if (e.code === 'ControlLeft') {
         stopTone();
-        const duration = Date.now() - signalStartTime; silenceStartTime = Date.now();
+        const duration = Date.now() - signalStartTime; 
+        silenceStartTime = Date.now();
         
-        // 短点・長点の判定閾値（100msを境目とする）
-        if (duration < 100) { 
-          currentCode += "."; 
-        } else { 
-          currentCode += "-"; 
+        // --- 動的しきい値による短点・長点の判定と速度学習 ---
+        const threshold = (estimatedDotTime + estimatedDashTime) / 2;
+
+        if (duration < threshold) {
+          currentCode += ".";
+          // 短点と判定された場合、速度をリアルタイム学習（移動平均）
+          estimatedDotTime = estimatedDotTime * 0.7 + duration * 0.3;
+        } else {
+          currentCode += "-";
+          // 長点と判定された場合（長点は短点の約3倍と仮定して逆算して学習）
+          const inferredDot = duration / 3;
+          estimatedDashTime = estimatedDashTime * 0.7 + duration * 0.3;
+          estimatedDotTime = estimatedDotTime * 0.7 + inferredDot * 0.3;
         }
-        
+
+        // 制限範囲（極端な値になりすぎないよう保護）
+        if (estimatedDotTime < 30) estimatedDotTime = 30;
+        if (estimatedDotTime > 400) estimatedDotTime = 400;
+        estimatedDashTime = estimatedDotTime * 3;
+
         currentCodeEl.textContent = currentCode;
         socket.emit('morse_event', { type: 'keyup' });
       }
