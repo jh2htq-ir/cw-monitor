@@ -37,10 +37,10 @@
 
   <div class="header-container">
     <h3>Morse Shared Monitor [ Channel: 1 ]</h3>
-    <button id="toggleSoundBtn" class="sound-btn">Sound: ON</button>
+    <button id="toggleSoundBtn" class="sound-btn">Sound: ON </button>
   </div>
   
-  <div class="info">Quick Word Spacing Mode.</div>
+  <div class="info">Click the screen, then use "USB Paddle Interface".</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
@@ -74,6 +74,7 @@
     let silenceStartTime = 0; 
     let currentCode = ""; 
     let decodedText = ""; 
+    let gapAdded = false;
     
     const monitorEl = document.getElementById('monitor'); 
     const currentCodeEl = document.getElementById('currentCode');
@@ -145,8 +146,8 @@
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 1. 文字確定の無音判定（短点の約2.3倍）
-        const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
+        // 1. 文字確定の無音判定（短点の約3.2倍：文字途中で勝手に切れないよう保護）
+        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) {
@@ -156,9 +157,9 @@
           currentCodeEl.textContent = "";
         }
 
-        // 2. 単語間スペースの判定（★従来の約7倍から約4.2倍へと短縮し、軽く一息つく程度でスペースが入るように調整）
-        const wordGapThreshold = Math.max(350, estimatedDotTime * 4.2);
-        if (silenceDuration >= wordGapThreshold) {
+        // 2. 単語間スペースの判定（約6倍に調整し、CとAやTとOの間で勝手にスペースが入るのを防止）
+        const wordGapThreshold = Math.max(500, estimatedDotTime * 6.0);
+        if (silenceDuration >= wordGapThreshold && !gapAdded) {
           if (currentCode.length > 0) {
             const char = morseTable[currentCode];
             if (char) { updateMonitor(char); }
@@ -168,7 +169,7 @@
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
-          silenceStartTime = 0; // 連続挿入防止
+          gapAdded = true; // 今回のスペース挿入完了をマーク
         }
       }
     }, 10);
@@ -180,7 +181,7 @@
         // 次の打鍵の直前、無音が十分に経っていれば前の文字を確定させる
         if (silenceStartTime > 0 && currentCode.length > 0) {
           const silenceDuration = Date.now() - silenceStartTime;
-          if (silenceDuration >= estimatedDotTime * 2.0) {
+          if (silenceDuration >= estimatedDotTime * 2.2) {
             const char = morseTable[currentCode];
             if (char) { updateMonitor(char); }
             currentCode = "";
@@ -191,6 +192,7 @@
         startTone();
         signalStartTime = Date.now(); 
         silenceStartTime = 0;
+        gapAdded = false; // 新しい打鍵が始まったのでスペース判定フラグをリセット
         socket.emit('morse_event', { type: 'keydown' });
       }
     });
