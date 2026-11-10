@@ -86,11 +86,11 @@
     toggleSoundBtn.addEventListener('click', () => {
       isMuted = !isMuted;
       if (isMuted) {
-        toggleSoundBtn.textContent = "Sound: OFF";
+        toggleSoundBtn.textContent = "🔇 Sound: OFF";
         toggleSoundBtn.classList.add('muted');
         stopTone();
       } else {
-        toggleSoundBtn.textContent = "Sound: ON";
+        toggleSoundBtn.textContent = "🔊 Sound: ON";
         toggleSoundBtn.classList.remove('muted');
       }
     });
