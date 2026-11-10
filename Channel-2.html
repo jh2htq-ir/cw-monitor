@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>CW リアルタイム・モールス共有モニター - チャンネル ２</title>
+  <title>CW リアルタイム・モールス共有モニター - チャンネル 2</title>
   <style>
     body { background-color: #121212; color: #00FF00; font-family: 'Courier New', Courier, monospace; padding: 20px; margin: 0; }
     
@@ -45,6 +45,7 @@
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
 
+  <!-- 画面下部のチャンネル切り替えアイコン（ナビゲーション） -->
   <div class="nav-links">
     <a href="index.html">Main</a>
     <a href="Channel-1.html">Ch.1</a>
@@ -61,6 +62,7 @@
     let osc = null;
     let isMuted = false;
 
+    // 動的適応型パラメータ（15WPM標準をベースに学習）
     let estimatedDotTime = 80;   
     let estimatedDashTime = 240; 
 
@@ -72,7 +74,7 @@
     let silenceStartTime = 0; 
     let currentCode = ""; 
     let decodedText = ""; 
-    let gapChecked = false;
+    let gapAdded = false;
     
     const monitorEl = document.getElementById('monitor'); 
     const currentCodeEl = document.getElementById('currentCode');
@@ -139,13 +141,13 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 定期監視：文字間および単語間の空白判定
+    // 定期監視ループ：文字確定および単語スペースの自動処理
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 1. 文字間ギャップ（約160ms以上の無音で1文字確定）
-        const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
+        // 1. 文字確定の無音判定（短点の約3.2倍：文字途中で勝手に切れないよう保護）
+        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
           if (char) {
@@ -155,13 +157,19 @@
           currentCodeEl.textContent = "";
         }
 
-        // 2. 単語間ギャップ（約450ms以上の無音でスペース挿入）
-        const wordGapThreshold = Math.max(450, estimatedDotTime * 6.0);
-        if (silenceDuration >= wordGapThreshold && !gapChecked) {
+        // 2. 単語間スペースの判定（約6倍に調整し、CとAやTとOの間で勝手にスペースが入るのを防止）
+        const wordGapThreshold = Math.max(500, estimatedDotTime * 6.0);
+        if (silenceDuration >= wordGapThreshold && !gapAdded) {
+          if (currentCode.length > 0) {
+            const char = morseTable[currentCode];
+            if (char) { updateMonitor(char); }
+            currentCode = "";
+            currentCodeEl.textContent = "";
+          }
           if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
             updateMonitor(" "); 
           }
-          gapChecked = true; // 今回の単語間スペース挿入完了をマーク
+          gapAdded = true; // 今回のスペース挿入完了をマーク
         }
       }
     }, 10);
@@ -170,15 +178,12 @@
       if (e.code === 'ControlLeft') {
         e.preventDefault(); if (e.repeat) return;
         
-        // 新しい打鍵が始まったら、まだ確定していない文字があれば先に確定させる
+        // 次の打鍵の直前、無音が十分に経っていれば前の文字を確定させる
         if (silenceStartTime > 0 && currentCode.length > 0) {
           const silenceDuration = Date.now() - silenceStartTime;
-          const letterGapThreshold = Math.max(160, estimatedDotTime * 2.3);
-          if (silenceDuration >= letterGapThreshold / 2) {
+          if (silenceDuration >= estimatedDotTime * 2.2) {
             const char = morseTable[currentCode];
-            if (char) {
-              updateMonitor(char);
-            }
+            if (char) { updateMonitor(char); }
             currentCode = "";
             currentCodeEl.textContent = "";
           }
@@ -187,7 +192,7 @@
         startTone();
         signalStartTime = Date.now(); 
         silenceStartTime = 0;
-        gapChecked = false; // 新しい打鍵が始まったのでスペース判定フラグをリセット
+        gapAdded = false; // 新しい打鍵が始まったのでスペース判定フラグをリセット
         socket.emit('morse_event', { type: 'keydown' });
       }
     });
@@ -201,17 +206,23 @@
         const threshold = (estimatedDotTime + estimatedDashTime) / 2;
         const symbol = duration < threshold ? "." : "-";
 
-        // 速度学習
+        // 打鍵スピードのリアルタイム学習
         if (symbol === ".") {
           estimatedDotTime = estimatedDotTime * 0.85 + duration * 0.15;
         } else {
           estimatedDashTime = estimatedDashTime * 0.85 + duration * 0.15;
           estimatedDotTime = estimatedDotTime * 0.85 + (duration / 3) * 0.15;
         }
+        
+        // 速度制限の安全保護
+        if (estimatedDotTime < 40) estimatedDotTime = 40;
+        if (estimatedDotTime > 300) estimatedDotTime = 300;
         estimatedDashTime = estimatedDotTime * 3;
 
+        // 符号を蓄積
         currentCode += symbol;
 
+        // 6文字以上の異常な蓄積を防ぐリセット
         if (currentCode.length > 6) {
           currentCode = "";
         }
