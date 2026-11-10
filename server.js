@@ -8,15 +8,22 @@ const io = require('socket.io')(http, {
 app.use(express.static(__dirname));
 
 io.on('connection', (socket) => {
-  // クライアントから「どのチャンネルに参加するか」を受け取る
+  // 1. クライアントから指定されたルーム（チャンネル）に参加する
   socket.on('join_room', (roomName) => {
     socket.join(roomName);
-    console.log(`ユーザーが部屋 [${roomName}] に参加しました`);
+    console.log(`User joined room: ${roomName}`);
+  });
 
-    // その部屋（チャンネル）の中にいるメンバーだけにイベントを転送する
-    socket.on('morse_event', (data) => {
-      socket.broadcast.to(roomName).emit('morse_event', data);
-    });
+  // 2. モールス信号のイベントを受け取ったら、その人が参加している同じルームの仲間だけに転送する
+  socket.on('morse_event', (data) => {
+    // socket.rooms から自分が参加しているルーム名（socket.id 以外のもの）を探す
+    const rooms = Array.from(socket.rooms);
+    const targetRoom = rooms.find(r => r !== socket.id);
+    
+    if (targetRoom) {
+      // 同じルーム（チャンネル）にいる他の人だけに送信
+      socket.to(targetRoom).emit('morse_event', data);
+    }
   });
 });
 
