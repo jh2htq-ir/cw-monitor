@@ -50,7 +50,7 @@
   <!-- 画面下部のチャンネル切り替えアイコン（ナビゲーション） -->
   <div class="nav-links">
     <a href="index.html">Main</a>
-    <a href="Channel-1.html" style="color:#00FF00; border-color:#00FF00;">Ch.1</a>
+    <a href="Channel-1.html" style="color:#00FF00; border-color:#FF0000;">Ch.1</a>
     <a href="Channel-2.html">Ch.2</a>
     <a href="Channel-3.html">Ch.3</a>
     <a href="Channel-4.html">Ch.4</a>
@@ -66,9 +66,9 @@
     let osc = null;
     let isMuted = false;
 
-    // 動的適応型パラメータ
-    let estimatedDotTime = 70;   
-    let estimatedDashTime = 210; 
+    // --- 15WPM（標準的スピード：短点約80ms）を初期値に設定 ---
+    let estimatedDotTime = 80;   
+    let estimatedDashTime = 240; 
 
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
@@ -140,14 +140,14 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 文字間・単語間の判定タイマー
+    // 15WPMのテンポに合わせた文字間・単語間判定タイマー
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 【修正】文字間の判定を少し余裕を持たせ、文字がくっつくのを防止
-        const letterGapThreshold = Math.max(160, estimatedDotTime * 3.8);
-        const wordGapThreshold = Math.max(400, estimatedDotTime * 9.0);
+        // 15WPM基準のギャップ判定（短点の約3.2倍以上で文字確定）
+        const letterGapThreshold = Math.max(220, estimatedDotTime * 3.2);
+        const wordGapThreshold = Math.max(550, estimatedDotTime * 7.5);
 
         if (silenceDuration >= letterGapThreshold && currentCode.length > 0) {
           const char = morseTable[currentCode];
@@ -179,20 +179,23 @@
         const duration = Date.now() - signalStartTime; 
         silenceStartTime = Date.now();
         
+        // 短点・長点の判定閾値
         const threshold = (estimatedDotTime + estimatedDashTime) / 2;
 
         if (duration < threshold) {
           currentCode += ".";
-          estimatedDotTime = estimatedDotTime * 0.7 + duration * 0.3;
+          // 追従性を安定させるため学習ウェイトを調整
+          estimatedDotTime = estimatedDotTime * 0.85 + duration * 0.15;
         } else {
           currentCode += "-";
           const inferredDot = duration / 3;
-          estimatedDashTime = estimatedDashTime * 0.7 + duration * 0.3;
-          estimatedDotTime = estimatedDotTime * 0.7 + inferredDot * 0.3;
+          estimatedDashTime = estimatedDashTime * 0.85 + duration * 0.15;
+          estimatedDotTime = estimatedDotTime * 0.85 + inferredDot * 0.15;
         }
 
-        if (estimatedDotTime < 30) estimatedDotTime = 30;
-        if (estimatedDotTime > 400) estimatedDotTime = 400;
+        // 15WPM前後に合わせた制限範囲
+        if (estimatedDotTime < 50) estimatedDotTime = 50;
+        if (estimatedDotTime > 200) estimatedDotTime = 200;
         estimatedDashTime = estimatedDotTime * 3;
 
         currentCodeEl.textContent = currentCode;
