@@ -40,7 +40,7 @@
     <button id="toggleSoundBtn" class="sound-btn">🔊 Sound: ON</button>
   </div>
   
-  <div class="info">Smart Parse Mode (Clean buffer & auto-routing).</div>
+  <div class="info">Clean Suffix-Match Mode (Fast & Garbage-free).</div>
   
   <div id="monitor"></div>
   <div id="status">Transmitting... <span id="currentCode"></span></div>
@@ -67,14 +67,6 @@
     const morseTable = {
       ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E", "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J", "-.-": "K", ".-..": "L", "--": "M", "-.": "N", "---": "O", ".--.": "P", "--.-": "Q", ".-.": "R", "...": "S", "-": "T", "..-": "U", "...-": "V", ".--": "W", "-..-": "X", "-.--": "Y", "--..": "Z", ".----": "1", "..---": "2", "...--": "3", "....-": "4", ".....": "5", "-....": "6", "--...": "7", "---..": "8", "----.": "9", "-----": "0", ".-.-.-": ".", "--..--": ",", "..--..": "?", "-..-.": "/", ".--.-.": "@", "-....-": "-", "-...-": "=", ".-.-.": "+", "...-.-": ";"
     };
-
-    function isValidPrefix(code) {
-      if (morseTable[code]) return true;
-      for (let key in morseTable) {
-        if (key.startsWith(code)) return true;
-      }
-      return false;
-    }
 
     let signalStartTime = 0; 
     let silenceStartTime = 0; 
@@ -146,36 +138,29 @@
       else if (data.type === 'char') { updateMonitor(data.value, true); }
     });
 
-    // 定期監視（空白判定 ＆ バッファの自動クリア安全装置）
+    // 定期監視（短い空白時間でも自動的に確定させるタイマー）
     setInterval(() => {
       if (silenceStartTime > 0) {
         const silenceDuration = Date.now() - silenceStartTime;
         
-        // 1. 単語間の空白判定（約0.6秒以上の無音でスペース挿入）
-        const wordGapThreshold = Math.max(500, estimatedDotTime * 7.0);
-        if (silenceDuration >= wordGapThreshold) {
-          // もし途中で打ちかけのまま止まった場合、未確定コードがあればここで確定を試みる
-          if (currentCode.length > 0) {
-            if (morseTable[currentCode]) {
-              updateMonitor(morseTable[currentCode]);
-            }
-            currentCode = "";
-            currentCodeEl.textContent = "";
-          }
-
-          if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
-            updateMonitor(" "); 
-          }
-          silenceStartTime = 0; 
-        }
-
-        // 2. 打ちかけのまま放置されたバッファの自動クリア（約0.8秒以上でゴミを消去）
-        if (silenceDuration >= 800 && currentCode.length > 0) {
+        // 1. 文字確定までの無音時間（約150ms〜200ms程度のごく短い空白で自動確定）
+        const shortLetterGap = Math.max(140, estimatedDotTime * 1.8);
+        if (silenceDuration >= shortLetterGap && currentCode.length > 0) {
           if (morseTable[currentCode]) {
             updateMonitor(morseTable[currentCode]);
           }
           currentCode = "";
           currentCodeEl.textContent = "";
+          silenceStartTime = 0;
+        }
+
+        // 2. 単語間の空白判定（約0.5秒以上の無音でスペース挿入）
+        const wordGapThreshold = Math.max(450, estimatedDotTime * 6.0);
+        if (silenceDuration >= wordGapThreshold) {
+          if (decodedText.length > 0 && !decodedText.endsWith(" ") && !decodedText.endsWith("\n")) { 
+            updateMonitor(" "); 
+          }
+          silenceStartTime = 0; 
         }
       }
     }, 10);
@@ -208,34 +193,32 @@
         }
         estimatedDashTime = estimatedDotTime * 3;
 
-        // --- スマート・パース処理 ＋ 文字化け防止クリーンアップ ---
-        let nextCode = currentCode + symbol;
+        // --- クリーン・パース処理 ---
+        currentCode += symbol;
 
-        if (isValidPrefix(nextCode)) {
-          currentCode = nextCode;
-        } else {
-          // どの文字のプレフィックスにも一致しない場合
-          if (morseTable[currentCode]) {
-            // 直前の有効なコードを確定
-            updateMonitor(morseTable[currentCode]);
-            currentCode = "";
-          } else {
-            // 辞書にない不正なゴミコードの場合はクリアしてリセット
-            currentCode = "";
-          }
-
-          // 新しいシンボル自体が有効なプレフィックスの始まりなら保持、でなければ破棄
-          if (isValidPrefix(symbol)) {
-            currentCode = symbol;
-          } else {
-            currentCode = "";
-          }
-        }
-
-        // 満杯（最大長6文字）に達した場合は強制確定
-        if (morseTable[currentCode] && currentCode.length >= 6) {
+        // もし現在のコードが辞書にそのまま存在するかチェック
+        if (morseTable[currentCode]) {
+          // ちょうど文字として成立した場合、即座に確定
           updateMonitor(morseTable[currentCode]);
           currentCode = "";
+        } else {
+          // 辞書に直接無い場合、長すぎてゴミが混ざっている可能性があるので、
+          // 後ろ側（直近に入力された符号）から順に有効なモールス文字を探す
+          let matched = false;
+          for (let len = Math.min(currentCode.length, 5); len >= 1; len--) {
+            let subCode = currentCode.slice(-len);
+            if (morseTable[subCode]) {
+              // 有効な文字を見つけたら、そこまでを確定して前の部分をキレイにリセット
+              updateMonitor(morseTable[subCode]);
+              currentCode = ""; // ゴミを残さず完全クリーンアップ
+              matched = true;
+              break;
+            }
+          }
+          // 万が一どれにもかすらない完全なゴミの場合はここでクリア
+          if (!matched && currentCode.length > 5) {
+            currentCode = "";
+          }
         }
 
         currentCodeEl.textContent = currentCode;
